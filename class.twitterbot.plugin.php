@@ -17,7 +17,7 @@ $PluginInfo['TwitterBot'] = array(
 
 class TwitterBotPlugin extends Gdn_Plugin {
     /**
-     * Adds a checkbox to new discussions.
+     * Adds a checkbox o new discussions.
      *
      * If not switched of in the settings, a checkbox is shown so that
      * individual discussions can explicetly _not_ be twittered.
@@ -74,8 +74,10 @@ class TwitterBotPlugin extends Gdn_Plugin {
 
         // Check if plugin is configured
         $consumerKey = Gdn::config('TwitterBot.ConsumerKey');
-        $secret = Gdn::config('TwitterBot.Secret');
-        if (!$consumerKey || !$secret) {
+        $consumerSecret = Gdn::config('TwitterBot.ConsumerSecret');
+        $oAuthAccessToken = Gdn::config('TwitterBot.OAuthAccessToken');
+        $oAuthAccessTokenSecret = Gdn::config('TwitterBot.OAuthAccessTokenSecret');
+        if (!$consumerKey || !$consumerSecret || !$oAuthAccessToken || !$oAuthAccessTokenSecret) {
             return;
         }
 
@@ -113,37 +115,39 @@ class TwitterBotPlugin extends Gdn_Plugin {
         $discussion = $args['Discussion'];
 
         // Exit if this discussion has already been twittered.
-        $attributes = unserialize($discussions->Attributes);
-        if ($attributes['TwitterBot'] == true) {
-            decho(__LINE__);return;
+        if ($discussion->Attributes['TwitterBot'] == true) {
+            return;
         }
 
         // Exit if discussions from this category shouldn't be twittered
-        if (in_array($discussion->CategoryID, Gdn::config('TwitterBot.CategoryIDs'))){
-            decho(__LINE__);return;
+        if (!in_array($discussion->CategoryID, Gdn::config('TwitterBot.CategoryIDs'))){
+            return;
         }
 
         // Exit if the current user hasn't the permission to twitter
         $roleIds = array_keys(Gdn::userModel()->getRoles($discussion->InsertUserID));
         if (array_intersect($roles, Gdn::config('TwitterBot.RoleIDs'))){
-            decho(__LINE__);return;
+            return;
         }
 
         // Exit if only announcements shall be twittered and this is no announcements
         if (Gdn::config('TwitterBot.AnnouncementsOnly') && !$discussion->Announce) {
-            decho(__LINE__);return;
+            return;
         }
 
         // Exit if checkbox is shown and not ticked
         if (Gdn::config('TwitterBot.ShowCheckbox') && !$args['FormPostValues']['TwitterBot']) {
-            decho(__LINE__);return;
+            return;
         }
 
         // Exit if plugin is not configured
         $consumerKey = Gdn::config('TwitterBot.ConsumerKey');
-        $secret = Gdn::config('TwitterBot.Secret');
-        if (!$consumerKey || !$secret) {
-            decho(__LINE__);return;
+        $consumerSecret = Gdn::config('TwitterBot.ConsumerSecret');
+        $oAuthAccessToken = Gdn::config('TwitterBot.OAuthAccessToken');
+        $oAuthAccessTokenSecret = Gdn::config('TwitterBot.OAuthAccessTokenSecret');
+
+        if (!$consumerKey || !$consumerSecret || !$oAuthAccessToken || !$oAuthAccessTokenSecret) {
+            return;
         }
 
         $title = $discussion->Name;
@@ -153,14 +157,28 @@ class TwitterBotPlugin extends Gdn_Plugin {
         $category = $discussion->Category;
         $url = $discussion->Url;
 
-// Let the magic happen here!
-// http://www.pontikis.net/blog/auto_post_on_twitter_with_php
-decho($discussion);
-        $sender->informMessage('This discussion has been published on Twitter', 'Dismissable');
-        if ($success) {
-            Gdn::discussionModel()->saveToSerializedColumn('Attributes', $discussion->DiscussionID, array('TwitterBot' => true));
-        }
+        $tweet = '"'.$title.'" by '.$author;
 
+        require_once(__DIR__.'/library/vendors/twitter-api-php/TwitterAPIExchange.php');
+        $settings = array(
+            'oauth_access_token' => $oAuthAccessToken,
+            'oauth_access_token_secret' => $oAuthAccessTokenSecret,
+            'consumer_key' => $consumerKey,
+            'consumer_secret' => $consumerSecret
+        );
+
+        $twitter = new TwitterAPIExchange($settings);
+        $response = $twitter
+            ->buildOauth('https://api.twitter.com/1.1/statuses/update.json', 'POST')
+            ->setPostfields(array('status' => $tweet))
+            ->performRequest();
+
+        $response = json_decode($response, true);
+
+        if (isset($response['created_at'])) {
+            // Gdn::controller()->informMessage('This discussion has been published on Twitter', 'Dismissable');
+            Gdn::discussionModel()->saveToSerializedColumn('Attributes', $discussion->DiscussionID, 'TwitterBot', true);
+        }
     }
 
     /**
@@ -181,14 +199,21 @@ decho($discussion);
         $userRoles = $roleModel->getArray();
 
         $configurationModule = new ConfigurationModule($sender);
-
         $configurationModule->initialize(array(
             'TwitterBot.ConsumerKey' => array(
-                'Description' => 'Get an official consumer key from Twitter and insert it here',
+                'LabelCode' => 'Your applications consumer key',
                 'Options' => array('class' => 'InputBox BigInput')
             ),
-            'TwitterBot.Secret' => array(
-                'Description' => 'Enter the secret code that belongs to your consumer key',
+            'TwitterBot.ConsumerSecret' => array(
+                'LabelCode' => 'The secret for your consumer key',
+                'Options' => array('class' => 'InputBox BigInput')
+            ),
+            'TwitterBot.OAuthAccessToken' => array(
+                'LabelCode' => 'Your oAuth access token',
+                'Options' => array('class' => 'InputBox BigInput')
+            ),
+            'TwitterBot.OAuthAccessTokenSecret' => array(
+                'LabelCode' => 'The secret for your oAuth access token',
                 'Options' => array('class' => 'InputBox BigInput')
             ),
             'TwitterBot.CategoryIDs' => array(
@@ -202,25 +227,25 @@ decho($discussion);
                 'Control' => 'CheckBoxList',
                 'LabelCode' => 'User roles',
                 'Items' => $userRoles,
-                'Description' => 'Only discussions of this users will be published on Twitter',
+                'Description' => 'Only discussions of this user roles will be published on Twitter',
                 'Options' => array('ValueField' => 'RoleID', 'TextField' => 'Name')
             ),
             'TwitterBot.AnnouncementsOnly' => array(
                 'Control' => 'CheckBox',
-                'Description' => 'By ticking this checkbox, only announcements will be tweeted',
+                // 'Description' => 'By ticking this checkbox, only announcements will be tweeted',
                 'LabelCode' => 'Only tweet announcements',
                 'Default' => true
             ),
             'TwitterBot.ShowCheckbox' => array(
                 'Control' => 'CheckBox',
-                'Description' => 'Show checkbox below discussions so that users with correct permissions can choose not to tweet a discussion',
-                'LabelCode' => 'Show checkbox',
+                // 'Description' => 'Show checkbox below discussions so that users with correct permissions can choose not to tweet a discussion',
+                'LabelCode' => 'Show checkbox below new discussions',
                 'Default' => true
             )
         ));
 
         $sender->setData('Title', t('TwitterBot Settings'));
-        $sender->setData('Description', t('New discussions will automatically appear on your Twitter account.'));
+        $sender->setData('Description', t('New discussions will automatically appear on your Twitter account. You have to <a href="https://apps.twitter.com/app/new">create a new app</a> and fill the credentials in her to make it work.'));
 
         $configurationModule->renderAll();
     }
