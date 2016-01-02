@@ -4,7 +4,7 @@ $PluginInfo['TwitterBot'] = array(
     'Name' => 'Twitter Bot',
     'Description' => 'Twitters new discussions autmatically.',
     'Version' => '0.1',
-    'RequiredApplications' => array('Vanilla' => '>= 2.1'),
+    'RequiredApplications' => array('Vanilla' => '>= 2.2'),
     'RequiredTheme' => false,
     'SettingsPermission' => 'Garden.Settings.Manage',
     'SettingsUrl' => '/dashboard/settings/twitterbot',
@@ -30,8 +30,10 @@ class TwitterBotPlugin extends Gdn_Plugin {
      */
     public function postController_discussionFormOptions_handler($sender, $args) {
         // Exit if the current user hasn't the permission to twitter
-        $roleIds = array_keys(Gdn::userModel()->getRoles(Gdn::session()->UserID));
-        if (array_intersect($roles, Gdn::config('TwitterBot.RoleIDs'))) {
+       $roleData = Gdn::UserModel()->getRoles(Gdn::session()->UserID);
+		$roleIds = ConsolidateArrayValuesByKey( $roleData->Result(), 'RoleID' );
+		
+		if (array_intersect($roleIds, Gdn::config('TwitterBot.RoleIDs'))) {
             return;
         }
 
@@ -42,8 +44,10 @@ class TwitterBotPlugin extends Gdn_Plugin {
 
         // Exit if the plugin has not been set up correctly
         $consumerKey = Gdn::config('TwitterBot.ConsumerKey');
-        $secret = Gdn::config('TwitterBot.Secret');
-        if (!$consumerKey || !$secret) {
+        $consumerSecret = Gdn::config('TwitterBot.ConsumerSecret');
+        $oAuthAccessToken = Gdn::config('TwitterBot.OAuthAccessToken');
+        $oAuthAccessTokenSecret = Gdn::config('TwitterBot.OAuthAccessTokenSecret');
+        if (!$consumerKey || !$consumerSecret || !$oAuthAccessToken || !$oAuthAccessTokenSecret) {
             return;
         }
 
@@ -82,8 +86,9 @@ class TwitterBotPlugin extends Gdn_Plugin {
         }
 
         // Check for role permissions
-        $roleIds = array_keys(Gdn::userModel()->getRoles(Gdn::session()->UserID));
-        if (array_intersect($roles, Gdn::config('TwitterBot.RoleIDs'))) {
+       $roleData = Gdn::UserModel()->getRoles(Gdn::session()->UserID);
+		$roleIds = ConsolidateArrayValuesByKey( $roleData->Result(), 'RoleID' );
+		 if (array_intersect($roleIds, Gdn::config('TwitterBot.RoleIDs'))) {
             // Don't give feedback since this is only true on error or if
             // user has spoofed post data. Desired result is that discussion is
             // posted to forum without issues but not on Twitter.
@@ -125,8 +130,10 @@ class TwitterBotPlugin extends Gdn_Plugin {
         }
 
         // Exit if the current user hasn't the permission to twitter
-        $roleIds = array_keys(Gdn::userModel()->getRoles($discussion->InsertUserID));
-        if (array_intersect($roles, Gdn::config('TwitterBot.RoleIDs'))){
+        $roleData = Gdn::UserModel()->getRoles(Gdn::session()->UserID);
+		$roleIds = ConsolidateArrayValuesByKey( $roleData->Result(), 'RoleID' );
+		
+        if (array_intersect($roleIds, Gdn::config('TwitterBot.RoleIDs'))){
             return;
         }
 
@@ -157,7 +164,11 @@ class TwitterBotPlugin extends Gdn_Plugin {
         $category = $discussion->Category;
         $url = $discussion->Url;
 
-        $tweet = '"'.$title.'" by '.$author;
+        //$tweet = '"'.$title.'" by '.$author;
+        
+        //build tweet using first five words of title and url
+        $five_words = implode(' ', array_slice(str_word_count($title, 2), 0, 5));
+		$tweet = $five_words ." ". $url;
 
         require_once(__DIR__.'/library/vendors/twitter-api-php/TwitterAPIExchange.php');
         $settings = array(
